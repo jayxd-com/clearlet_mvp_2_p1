@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1768739263534,
+      "tag": "0000_wise_mac_gargan",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1769160894323,
+      "tag": "0001_demonic_krista_starr",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1769813522057,
+      "tag": "0002_optimal_bloodstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1769814701498,
+      "tag": "0003_red_kate_bishop",
+      "breakpoints": true
+    }
+  ]
+}

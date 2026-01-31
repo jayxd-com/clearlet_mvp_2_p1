@@ -1,0 +1,1 @@
+ALTER TABLE `chatbot_leads` ADD `nextFollowUpDate` timestamp;

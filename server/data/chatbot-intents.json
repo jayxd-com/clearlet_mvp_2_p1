@@ -1,0 +1,98 @@
+[
+  {
+    "id": "greeting",
+    "category": "general",
+    "patterns": [
+      "hi",
+      "hello",
+      "hey",
+      "hola",
+      "good morning",
+      "good afternoon",
+      "buenos dias",
+      "buenas tardes"
+    ],
+    "responses": {
+      "en": ["Hello! How can I help you today? I can assist with property search, verification, or pricing questions."],
+      "es": ["¡Hola! ¿Cómo puedo ayudarte hoy? Puedo ayudarte con la búsqueda de propiedades, verificación o preguntas sobre precios."]
+    },
+    "action": {
+      "type": "none"
+    }
+  },
+  {
+    "id": "property_search",
+    "category": "property",
+    "patterns": [
+      "find.*property", 
+      "search.*property", 
+      "looking for.*property", 
+      "apartment", 
+      "flat", 
+      "house", 
+      "rental", 
+      "rent", 
+      "buscar.*propiedad", 
+      "encontrar.*piso", 
+      "alquiler", 
+      "casa", 
+      "habitaci.n"
+    ],
+    "responses": {
+      "en": ["I can help you find properties! Search by city, price, and more."],
+      "es": ["¡Puedo ayudarte a encontrar propiedades! Busca por ciudad, precio y más."]
+    },
+    "action": {
+      "type": "capture_lead"
+    }
+  },
+  {
+    "id": "upload_documents",
+    "category": "verification",
+    "patterns": [
+      "upload documents",
+      "verify identity",
+      "upload ID",
+      "upload income proof",
+      "subir documentos",
+      "verificar identidad"
+    ],
+    "responses": {
+      "en": ["You can upload your verification documents in your profile settings. Go to the 'Documents' tab or click below."],
+      "es": ["Puedes subir tus documentos de verificación en la configuración de tu perfil. Ve a la pestaña 'Documentos' o haz clic abajo."]
+    },
+    "action": {
+      "type": "link",
+      "payload": "/tenant/settings",
+      "label": {
+        "en": "Upload Documents",
+        "es": "Subir Documentos"
+      }
+    }
+  },
+  {
+    "id": "pricing",
+    "category": "info",
+    "patterns": [
+      "price", 
+      "cost", 
+      "fee", 
+      "precio", 
+      "costo", 
+      "tarifa",
+      "pricing"
+    ],
+    "responses": {
+      "en": ["Our pricing is transparent. Check out our pricing page for more details."],
+      "es": ["Nuestros precios son transparentes. Consulta nuestra página de precios para más detalles."]
+    },
+    "action": {
+      "type": "link",
+      "payload": "/pricing",
+      "label": {
+        "en": "View Pricing",
+        "es": "Ver Precios"
+      }
+    }
+  }
+]
