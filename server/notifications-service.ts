@@ -982,3 +982,94 @@ export async function notifyContractAmendmentResponded(params: {
     );
   }
 }
+
+export async function notifyChecklistSubmitted(params: {
+  landlordId: number;
+  tenantName: string;
+  contractId: number;
+  propertyTitle: string;
+}) {
+  const { landlordId, tenantName, propertyTitle, contractId } = params;
+  const landlord = await getUser(landlordId);
+  if (!landlord) return;
+
+  const lang = landlord.languagePreference || "en";
+  const subject = "Move-In Checklist Submitted";
+  const message = `${tenantName} has submitted the move-in checklist for ${propertyTitle}. Please review and sign.`;
+
+  await createNotification({
+    userId: landlordId,
+    type: "checklist",
+    title: subject,
+    message,
+    link: `/landlord/checklist/${contractId}`,
+  });
+
+  if (landlord.email) {
+    await sendSystemNotificationEmail(
+      landlord.email,
+      landlord.name || "Landlord",
+      subject,
+      message,
+      `/landlord/checklist/${contractId}`,
+      "Review Checklist",
+      lang
+    );
+  }
+}
+
+export async function notifyChecklistCompleted(params: {
+  landlordId: number;
+  tenantId: number;
+  contractId: number;
+  propertyTitle: string;
+}) {
+  const { landlordId, tenantId, propertyTitle, contractId } = params;
+  const landlord = await getUser(landlordId);
+  const tenant = await getUser(tenantId);
+  
+  const subject = "Move-In Checklist Completed";
+  const message = `The move-in checklist for ${propertyTitle} has been signed and completed.`;
+
+  if (landlord) {
+    await createNotification({
+      userId: landlordId,
+      type: "checklist",
+      title: subject,
+      message,
+      link: `/landlord/checklist/${contractId}`,
+    });
+    if (landlord.email) {
+      await sendSystemNotificationEmail(
+        landlord.email,
+        landlord.name || "Landlord",
+        subject,
+        message,
+        `/landlord/checklist/${contractId}`,
+        "View Checklist",
+        landlord.languagePreference || "en"
+      );
+    }
+  }
+
+  if (tenant) {
+    await createNotification({
+      userId: tenantId,
+      type: "checklist",
+      title: subject,
+      message,
+      link: `/tenant/checklist/${contractId}`,
+    });
+    if (tenant.email) {
+      await sendSystemNotificationEmail(
+        tenant.email,
+        tenant.name || "Tenant",
+        subject,
+        message,
+        `/tenant/checklist/${contractId}`,
+        "View Checklist",
+        tenant.languagePreference || "en"
+      );
+    }
+  }
+}

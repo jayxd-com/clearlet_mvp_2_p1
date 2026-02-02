@@ -26,7 +26,8 @@ import {
   Trash2,
   AlertTriangle,
   Check,
-  X
+  X,
+  ClipboardList
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -351,6 +352,27 @@ export default function LandlordContractsPage() {
                 </div>
 
                 <div className="flex md:flex-col gap-2 min-w-[140px] items-center md:items-end">
+                  {contract.checklistStatus === "tenant_signed" && (
+                    <PremiumButton 
+                      size="sm"
+                      className="w-full md:w-32 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20"
+                      onClick={() => setLocation(`/landlord/checklist/${contract.id}`)}
+                    >
+                      <ClipboardList className="h-4 w-4 mr-2" /> Review
+                    </PremiumButton>
+                  )}
+
+                  {contract.checklistStatus === "completed" && (
+                    <PremiumButton 
+                      variant="outline"
+                      size="sm"
+                      className="w-full md:w-32 rounded-xl border-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                      onClick={() => setLocation(`/landlord/checklist/${contract.id}`)}
+                    >
+                      <CheckCircle className="h-4 w-4 mr-2" /> Checklist
+                    </PremiumButton>
+                  )}
+
                   <PremiumButton 
                     variant="outline" 
                     size="sm"

@@ -46,9 +46,17 @@ export function MoveInChecklistModal({ contractId, open, onOpenChange, onComplet
   useEffect(() => {
     if (checklist?.items) {
       try {
-        setChecklistData(JSON.parse(checklist.items));
+        const parsed = JSON.parse(checklist.items);
+        if (Array.isArray(parsed)) {
+          setChecklistData({ rooms: parsed });
+        } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.rooms)) {
+          setChecklistData(parsed);
+        } else {
+          setChecklistData({ rooms: [] });
+        }
       } catch (e) {
         console.error("Failed to parse checklist items:", e);
+        setChecklistData({ rooms: [] });
       }
     }
   }, [checklist]);

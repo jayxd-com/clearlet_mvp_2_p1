@@ -36,7 +36,7 @@ export const appRouter = router({
   contracts: contractsRouter,
   tenant: tenantRouter,
   landlord: landlordRouter,
-  uploads: uploadRouter,
+  upload: uploadRouter,
   documentVault: documentVaultRouter,
   keyCollections: keyCollectionsRouter,
   messages: messagesRouter,

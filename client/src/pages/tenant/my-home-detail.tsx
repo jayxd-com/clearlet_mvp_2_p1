@@ -112,6 +112,11 @@ export default function TenantMyHomeDetailPage() {
   const property = contract.property;
   const landlord = contract.landlord;
 
+  // Calculate days remaining for checklist
+  const checklistDeadline = contract.checklistDeadline ? new Date(contract.checklistDeadline) : null;
+  const daysLeft = checklistDeadline ? Math.ceil((checklistDeadline.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : 0;
+  const isOverdue = daysLeft < 0;
+
   // Parse images safely
   let propertyImage = null;
   try {
@@ -173,11 +178,14 @@ export default function TenantMyHomeDetailPage() {
               <div className="space-y-2">
                 <label className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Reason for leaving</label>
                 <Textarea 
-                  placeholder="Explain your situation..." 
+                  placeholder="Explain your situation (min. 10 characters)..." 
                   className="rounded-xl border-2 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white min-h-[100px] placeholder:text-slate-400"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                 />
+                {reason && reason.length < 10 && (
+                  <p className="text-[10px] text-red-500 font-bold">Please provide a more detailed reason (at least 10 characters).</p>
+                )}
               </div>
             </div>
             <DialogFooter className="gap-2">
@@ -186,7 +194,7 @@ export default function TenantMyHomeDetailPage() {
                 variant="destructive" 
                 onClick={() => requestTermination.mutate({ contractId, reason, desiredEndDate: endDate })}
                 className="rounded-xl font-black uppercase tracking-widest px-8 shadow-lg shadow-red-500/20"
-                disabled={!endDate || !reason || requestTermination.isPending}
+                disabled={!endDate || reason.length < 10 || requestTermination.isPending}
               >
                 {requestTermination.isPending ? "Sending..." : "Send Request"}
               </Button>
@@ -207,11 +215,14 @@ export default function TenantMyHomeDetailPage() {
               <div className="space-y-2">
                 <label className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Requested Changes</label>
                 <Textarea 
-                  placeholder="Describe the changes you need..." 
+                  placeholder="Describe the changes you need (min. 10 characters)..." 
                   className="rounded-xl border-2 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white min-h-[120px] placeholder:text-slate-400"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                 />
+                {reason && reason.length < 10 && (
+                  <p className="text-[10px] text-red-500 font-bold">Please provide more detail (at least 10 characters).</p>
+                )}
               </div>
             </div>
             <DialogFooter className="gap-2">
@@ -224,7 +235,7 @@ export default function TenantMyHomeDetailPage() {
                   changes: { reason } 
                 })}
                 className="bg-cyan-500 hover:bg-cyan-600 text-white rounded-xl font-black uppercase tracking-widest px-8 shadow-lg shadow-cyan-500/20"
-                disabled={!reason || requestAmendment.isPending}
+                disabled={reason.length < 10 || requestAmendment.isPending}
               >
                 {requestAmendment.isPending ? "Submitting..." : "Submit Request"}
               </Button>
@@ -273,22 +284,30 @@ export default function TenantMyHomeDetailPage() {
 
         {/* Alerts/Notifications */}
         {checklist && checklist.status !== "completed" && (
-          <div className="mb-8 bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-2xl p-6 flex items-center justify-between shadow-md">
+          <div className={`mb-8 border-2 rounded-2xl p-6 flex items-center justify-between shadow-md ${isOverdue ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800" : "bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800"}`}>
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-orange-500 rounded-xl shadow-lg">
+              <div className={`p-3 rounded-xl shadow-lg ${isOverdue ? "bg-red-500" : "bg-orange-500"}`}>
                 <CheckSquare className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h3 className="font-bold text-lg text-orange-900 dark:text-orange-100">Complete Move-In Checklist</h3>
-                <p className="text-sm text-orange-700 dark:text-orange-300">Please document the property condition to protect your deposit.</p>
+                <h3 className={`font-bold text-lg ${isOverdue ? "text-red-900 dark:text-red-100" : "text-orange-900 dark:text-orange-100"}`}>
+                  Complete Move-In Checklist
+                  {checklistDeadline && (
+                    <span className={`ml-2 text-sm px-2 py-0.5 rounded-full ${isOverdue ? "bg-red-200 text-red-800" : "bg-orange-200 text-orange-800"}`}>
+                      {isOverdue ? `Overdue by ${Math.abs(daysLeft)} days` : `${daysLeft} days left`}
+                    </span>
+                  )}
+                </h3>
+                <p className={`text-sm ${isOverdue ? "text-red-700 dark:text-red-300" : "text-orange-700 dark:text-orange-300"}`}>
+                  Please document the property condition to protect your deposit.
+                </p>
               </div>
             </div>
             <Button 
-              onClick={() => completeChecklistMutation.mutate({ checklistId: checklist.id })} 
-              disabled={completeChecklistMutation.isPending}
-              className="bg-orange-500 hover:bg-orange-600 text-white font-bold h-11 px-6 rounded-xl"
+              onClick={() => setLocation(`/tenant/checklist/${contractId}`)} 
+              className={`${isOverdue ? "bg-red-500 hover:bg-red-600" : "bg-orange-500 hover:bg-orange-600"} text-white font-bold h-11 px-6 rounded-xl`}
             >
-              {completeChecklistMutation.isPending ? "Updating..." : "Checklist Done"} <CheckSquare className="ml-2 h-4 w-4" />
+              Start Checklist <CheckSquare className="ml-2 h-4 w-4" />
             </Button>
           </div>
         )}

@@ -1,6 +1,6 @@
 import { useLocation } from "wouter";
 import { useState, useMemo } from "react";
-import { FileText, Upload, CheckCircle, AlertCircle, Trash2, Download, Plus, Calendar, Clock, FileCheck, Receipt, Shield } from "lucide-react";
+import { FileText, Upload, CheckCircle, AlertCircle, Trash2, Download, Plus, Calendar, Clock, FileCheck, Receipt, Shield, CheckSquare, Eye } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ export default function TenantDocumentsPage() {
     enabled: !!user,
   });
   const utils = trpc.useUtils();
+  const generateChecklistPdf = trpc.checklist.generatePdf.useMutation();
 
   // Delete document mutation
   const deleteDocumentMutation = trpc.uploads.deleteDocument.useMutation({
@@ -75,6 +76,25 @@ export default function TenantDocumentsPage() {
         propertyTitle: contract.property?.title,
       }));
 
+    const checklistDocs = (contractsData || [])
+      .filter((contract: any) => contract.checklistStatus === "completed")
+      .map((contract: any) => ({
+        id: `checklist-${contract.id}`,
+        fileName: `Move-In Checklist - ${contract.property?.title || `Property ${contract.propertyId}`}`,
+        fileUrl: `/tenant/checklist/${contract.id}`, // Link to view
+        documentType: "checklist",
+        category: "contracts", // Group with contracts
+        categoryLabel: "Property Reports",
+        icon: CheckSquare,
+        verificationStatus: "verified",
+        createdAt: contract.updatedAt, // Use last update (completion time roughly)
+        updatedAt: contract.updatedAt,
+        contractId: contract.id,
+        checklistId: contract.checklistId,
+        propertyTitle: contract.property?.title,
+        isDigital: true, // Flag to handle click differently
+      }));
+
     const vaultDocs = (vaultDocumentsData || []).map((doc: any) => ({
       ...doc,
       category: doc.category === "lease" ? "agreements" : "other",
@@ -86,7 +106,7 @@ export default function TenantDocumentsPage() {
 
     return {
       verification: verificationDocs,
-      contracts: contractDocs,
+      contracts: [...contractDocs, ...checklistDocs],
       agreements: vaultDocs.filter((d: any) => d.category === "agreements"),
       other: vaultDocs.filter((d: any) => d.category === "other"),
     };
@@ -148,12 +168,31 @@ export default function TenantDocumentsPage() {
     }
   };
 
-  const handleDownload = async (documentId: number | string, fileName: string, fileUrl?: string) => {
+  const handleGeneratePdf = async (checklistId: number) => {
     try {
-      let downloadUrl = fileUrl;
+      toast.loading("Generating PDF...");
+      const { pdfUrl } = await generateChecklistPdf.mutateAsync({ checklistId });
+      toast.dismiss();
+      window.open(pdfUrl, "_blank");
+    } catch (error: any) {
+      toast.dismiss();
+      toast.error(error.message || "Failed to generate PDF");
+    }
+  };
+
+  const handleDownload = async (doc: any) => {
+    try {
+      if (doc.isDigital && doc.fileUrl) {
+        setLocation(doc.fileUrl);
+        return;
+      }
+
+      let downloadUrl = doc.fileUrl;
+      const documentId = doc.id;
+      const fileName = doc.fileName;
       
       if (typeof documentId === 'string' && documentId.startsWith('contract-')) {
-        downloadUrl = fileUrl;
+        downloadUrl = doc.fileUrl;
       } else if (typeof documentId === 'number') {
         // Always fetch a signed URL for verification documents to handle private buckets
         toast.loading("Generating secure download link...");
@@ -394,14 +433,25 @@ export default function TenantDocumentsPage() {
                       <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{formatDate(doc.createdAt)}</p>
                     </div>
                     <div className="flex gap-2">
+                      {doc.documentType === 'checklist' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleGeneratePdf(doc.checklistId)}
+                          className="flex-1 border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          PDF
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDownload(doc.id, doc.fileName, doc.fileUrl)}
+                        onClick={() => handleDownload(doc)}
                         className="flex-1 border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
                       >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download
+                        {doc.isDigital ? <Eye className="h-4 w-4 mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                        {doc.isDigital ? "View" : "Download"}
                       </Button>
                       {!doc.contractId && doc.verificationStatus !== "verified" && (
                         <Button

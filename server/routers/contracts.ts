@@ -30,10 +30,13 @@ export const contractsRouter = router({
           contract: contracts,
           property: properties,
           landlord: users,
+          checklistStatus: moveInChecklists.status,
+          checklistId: moveInChecklists.id,
         })
         .from(contracts)
         .innerJoin(properties, eq(contracts.propertyId, properties.id))
         .innerJoin(users, eq(contracts.landlordId, users.id))
+        .leftJoin(moveInChecklists, eq(contracts.id, moveInChecklists.contractId))
         .where(eq(contracts.tenantId, ctx.user.id))
         .orderBy(desc(contracts.createdAt));
 
@@ -43,6 +46,8 @@ export const contractsRouter = router({
         ...row.contract,
         property: row.property,
         landlord: row.landlord,
+        checklistStatus: row.checklistStatus,
+        checklistId: row.checklistId,
       }));
     } catch (error: any) {
       console.error("[contracts.getTenantContracts] Error:", error);
@@ -62,10 +67,12 @@ export const contractsRouter = router({
         contract: contracts,
         property: properties,
         tenant: users,
+        checklistStatus: moveInChecklists.status,
       })
       .from(contracts)
       .innerJoin(properties, eq(contracts.propertyId, properties.id))
       .innerJoin(users, eq(contracts.tenantId, users.id))
+      .leftJoin(moveInChecklists, eq(contracts.id, moveInChecklists.contractId))
       .where(eq(contracts.landlordId, ctx.user.id))
       .orderBy(desc(contracts.createdAt));
 
@@ -73,6 +80,7 @@ export const contractsRouter = router({
       ...row.contract,
       property: row.property,
       tenant: row.tenant,
+      checklistStatus: row.checklistStatus,
     }));
   }),
 
@@ -174,6 +182,7 @@ El incumplimiento de las obligaciones contractuales dará lugar a la resolución
         specialConditions: input.specialConditions,
         status: input.sendImmediately ? "sent_to_tenant" : "draft",
         language: input.language,
+        checklistDeadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       });
 
       const contractId = result.insertId;
@@ -200,9 +209,32 @@ El incumplimiento de las obligaciones contractuales dará lugar a la resolución
           });
 
           if (template) {
+            // Sanitize template items to remove any pre-filled data
+            let cleanItems = "[]";
+            try {
+              const parsed = JSON.parse(template.items);
+              const rooms = Array.isArray(parsed) ? parsed : (parsed.rooms || []);
+              
+              const sanitizedRooms = rooms.map((room: any) => ({
+                room: room.room,
+                items: room.items.map((item: any) => ({
+                  name: item.name,
+                  condition: "", // Reset condition
+                  notes: "", // Reset notes
+                  photos: [], // Reset photos
+                }))
+              }));
+              
+              cleanItems = JSON.stringify({ rooms: sanitizedRooms });
+            } catch (e) {
+              console.error("Failed to sanitize checklist template items:", e);
+              // Fallback to original if parse fails, though ideally we should fix it
+              cleanItems = template.items; 
+            }
+
             const [checklistResult] = await db.insert(moveInChecklists).values({
               contractId: contractId,
-              items: template.items,
+              items: cleanItems,
               photos: "[]",
               status: "draft",
             });
@@ -257,6 +289,7 @@ El incumplimiento de las obligaciones contractuales dará lugar a la resolución
         throw new TRPCError({ code: "FORBIDDEN", message: "Cannot delete a signed or active contract" });
       }
 
+      await db.delete(moveInChecklists).where(eq(moveInChecklists.contractId, input.contractId));
       await db.delete(contracts).where(eq(contracts.id, input.contractId));
 
       return { success: true };
@@ -284,6 +317,11 @@ El incumplimiento de las obligaciones contractuales dará lugar a la resolución
           await db.update(properties)
             .set({ status: "active" })
             .where(eq(properties.id, contract.propertyId));
+            
+          // Delete associated checklist if contract is terminated (to allow fresh start)
+          if (input.status === "terminated") {
+             await db.delete(moveInChecklists).where(eq(moveInChecklists.contractId, input.contractId));
+          }
         }
       }
 
@@ -338,14 +376,67 @@ El incumplimiento de las obligaciones contractuales dará lugar a la resolución
   attachChecklist: protectedProcedure
     .input(z.object({
       contractId: z.number(),
-      checklistId: z.number(),
+      templateId: z.number(), // Changed from checklistId to templateId to reflect actual usage
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb() as any;
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
 
+      const [contract] = await db.select().from(contracts).where(eq(contracts.id, input.contractId));
+      if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "Contract not found" });
+
+      const template = await db.query.checklistTemplates.findFirst({
+        where: eq(checklistTemplates.id, input.templateId)
+      });
+
+      if (!template) throw new TRPCError({ code: "NOT_FOUND", message: "Template not found" });
+
+      // Sanitize and Create Checklist
+      let cleanItems = "[]";
+      try {
+        const parsed = JSON.parse(template.items);
+        const rooms = Array.isArray(parsed) ? parsed : (parsed.rooms || []);
+        
+        const sanitizedRooms = rooms.map((room: any) => ({
+          room: room.room,
+          items: room.items.map((item: any) => ({
+            name: item.name,
+            condition: "", // Reset
+            notes: "", // Reset
+            photos: [], // Reset
+          }))
+        }));
+        
+        cleanItems = JSON.stringify({ rooms: sanitizedRooms });
+      } catch (e) {
+        console.error("Failed to sanitize checklist items during attach:", e);
+        cleanItems = template.items;
+      }
+
+      // Check if checklist already exists for this contract? 
+      // If so, replace it or error? Logic says "Attach", implies setting one.
+      // We will create a new one. If one exists, it becomes orphaned or overwritten.
+      // Ideally delete old one if exists.
+      
+      if (contract.checklistId) {
+        await db.delete(moveInChecklists).where(eq(moveInChecklists.id, contract.checklistId));
+      }
+
+      const [checklistResult] = await db.insert(moveInChecklists).values({
+        contractId: input.contractId,
+        items: cleanItems,
+        photos: "[]",
+        status: "draft",
+      });
+
+      const deadline = contract.checklistDeadline || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
       await db.update(contracts)
-        .set({ checklistId: input.checklistId, updatedAt: new Date() })
+        .set({ 
+          checklistId: checklistResult.insertId, 
+          checklistDeadline: deadline,
+          updatedAt: new Date() 
+        })
         .where(eq(contracts.id, input.contractId));
 
       return { success: true };

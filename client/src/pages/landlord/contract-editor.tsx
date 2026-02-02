@@ -248,11 +248,13 @@ export default function ContractEditorPage() {
                 </SelectContent>
               </Select>
             </div>
-            <PremiumButton className="w-full h-12" onClick={() => {
-              attachChecklistMutation.mutate({ contractId: contractId!, checklistId: parseInt(selectedChecklistId) });
-              setShowChecklistDialog(false);
+            <PremiumButton onClick={() => {
+              if (contractId && selectedChecklistId) {
+                attachChecklistMutation.mutate({ contractId: contractId!, templateId: parseInt(selectedChecklistId) });
+                setShowChecklistDialog(false);
+              }
             }}>
-              Attach to Contract
+              Confirm Attachment
             </PremiumButton>
           </div>
         </DialogContent>

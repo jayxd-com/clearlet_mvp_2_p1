@@ -1,10 +1,13 @@
 import { router, protectedProcedure } from "../trpc";
 import { z } from "zod";
 import { getDb } from "../db";
-import { moveInChecklists, contracts, checklistTemplates } from "../../drizzle/schema";
+import { moveInChecklists, contracts, checklistTemplates, users, properties } from "../../drizzle/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { TRPCError } from "@trpc/server";
-import { createPresignedUploadUrl, getPublicImageUrl } from "../s3";
+import { createPresignedUploadUrl, getPublicImageUrl, putObject } from "../s3";
+import { notifyChecklistSubmitted, notifyChecklistCompleted } from "../notifications-service";
+import { generateChecklistPdf } from "../checklist-pdf-service";
 
 export const checklistRouter = router({
   getTemplates: protectedProcedure
@@ -122,31 +125,132 @@ export const checklistRouter = router({
       photoData: z.string(), // base64
     }))
     .mutation(async ({ ctx, input }) => {
-      // In a real app, you'd upload the base64 to S3
-      // For now, let's return a mock URL or use our S3 helper if adapted
+      const db = await getDb() as any;
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+
+      const matches = input.photoData.match(/^data:(.+);base64,(.+)$/);
+      if (!matches) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid photo data" });
+
+      const contentType = matches[1];
+      const buffer = Buffer.from(matches[2], "base64");
+
       const key = `checklists/${input.checklistId}/${Date.now()}-${input.fileName}`;
+      await putObject(key, buffer, contentType, "public-read");
+      
       const publicUrl = getPublicImageUrl(key);
       
       return { url: publicUrl };
+    }),
+
+  submit: protectedProcedure
+    .input(z.object({
+      checklistId: z.number(),
+      items: z.string(), // JSON
+      signature: z.string(), // base64
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb() as any;
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+
+      const checklistResult = await db
+        .select({
+          checklist: moveInChecklists,
+          contract: contracts,
+        })
+        .from(moveInChecklists)
+        .innerJoin(contracts, eq(moveInChecklists.contractId, contracts.id))
+        .where(eq(moveInChecklists.id, input.checklistId))
+        .limit(1);
+
+      const row = checklistResult[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Checklist not found" });
+      if (row.contract.tenantId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+
+      // Update checklist
+      await db.update(moveInChecklists)
+        .set({
+          items: input.items,
+          tenantSignature: input.signature,
+          tenantSignedAt: new Date(),
+          status: "tenant_signed", // Treated as "Pending Landlord Review" in UI
+          updatedAt: new Date(),
+        })
+        .where(eq(moveInChecklists.id, input.checklistId));
+
+      // Notify Landlord
+      try {
+        const property = await db.query.properties.findFirst({
+          where: eq(properties.id, row.contract.propertyId),
+        });
+        
+        await notifyChecklistSubmitted({
+          landlordId: row.contract.landlordId,
+          tenantName: ctx.user.name || "Tenant",
+          contractId: row.contract.id,
+          propertyTitle: property?.title || "Property",
+        });
+      } catch (e) {
+        console.error("Failed to send checklist notification:", e);
+      }
+
+      return { success: true };
     }),
 
   sign: protectedProcedure
     .input(z.object({
       checklistId: z.number(),
       signature: z.string(), // base64
-      role: z.enum(["tenant", "landlord"]).default("tenant"),
+      notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb() as any;
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
 
-      const updateData = input.role === "landlord" 
-        ? { landlordSignature: input.signature, landlordSignedAt: new Date(), status: "completed" }
-        : { tenantSignature: input.signature, tenantSignedAt: new Date(), status: "tenant_signed" };
+      const checklistResult = await db
+        .select({
+          checklist: moveInChecklists,
+          contract: contracts,
+        })
+        .from(moveInChecklists)
+        .innerJoin(contracts, eq(moveInChecklists.contractId, contracts.id))
+        .where(eq(moveInChecklists.id, input.checklistId))
+        .limit(1);
 
+      const row = checklistResult[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Checklist not found" });
+      if (row.contract.landlordId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+
+      // Update checklist
       await db.update(moveInChecklists)
-        .set(updateData)
+        .set({
+          landlordSignature: input.signature,
+          landlordSignedAt: new Date(),
+          landlordNotes: input.notes,
+          status: "completed",
+          updatedAt: new Date(),
+        })
         .where(eq(moveInChecklists.id, input.checklistId));
+
+      // Update Contract
+      await db.update(contracts)
+        .set({ checklistCompletedAt: new Date() })
+        .where(eq(contracts.id, row.contract.id));
+
+      // Notify Both
+      try {
+        const property = await db.query.properties.findFirst({
+          where: eq(properties.id, row.contract.propertyId),
+        });
+
+        await notifyChecklistCompleted({
+          landlordId: row.contract.landlordId,
+          tenantId: row.contract.tenantId,
+          contractId: row.contract.id,
+          propertyTitle: property?.title || "Property",
+        });
+      } catch (e) {
+        console.error("Failed to send completion notification:", e);
+      }
 
       return { success: true };
     }),
@@ -183,5 +287,67 @@ export const checklistRouter = router({
         .where(eq(moveInChecklists.id, input.checklistId));
 
       return { success: true };
+    }),
+
+  generatePdf: protectedProcedure
+    .input(z.object({ checklistId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb() as any;
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+
+      // Fetch Checklist & Related Data
+      const checklistResult = await db
+        .select({
+          checklist: moveInChecklists,
+          contract: contracts,
+          property: properties,
+          landlord: users,
+          tenant: users,
+        })
+        .from(moveInChecklists)
+        .innerJoin(contracts, eq(moveInChecklists.contractId, contracts.id))
+        .innerJoin(properties, eq(contracts.propertyId, properties.id))
+        .innerJoin(users, eq(contracts.landlordId, users.id))
+        .innerJoin(alias(users, "tenant"), eq(contracts.tenantId, alias(users, "tenant").id))
+        .where(eq(moveInChecklists.id, input.checklistId))
+        .limit(1);
+
+      const row = checklistResult[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Checklist not found" });
+
+      const { checklist, contract, property, landlord, tenant } = row;
+
+      // Access Control
+      if (contract.tenantId !== ctx.user.id && contract.landlordId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+
+      let parsedItems = { rooms: [] };
+      try {
+        const raw = JSON.parse(checklist.items);
+        if (Array.isArray(raw)) parsedItems = { rooms: raw };
+        else if (raw && raw.rooms) parsedItems = raw;
+      } catch (e) {
+        console.error("Failed to parse checklist items for PDF:", e);
+      }
+
+      // Generate PDF
+      const pdfUrl = await generateChecklistPdf({
+        checklistId: checklist.id,
+        contractId: contract.id,
+        propertyTitle: property.title,
+        propertyAddress: property.address,
+        landlordName: landlord.name || "Landlord",
+        tenantName: tenant.name || "Tenant",
+        checklistItems: parsedItems,
+        landlordSignature: checklist.landlordSignature || undefined,
+        tenantSignature: checklist.tenantSignature || undefined,
+        landlordSignedAt: checklist.landlordSignedAt || undefined,
+        tenantSignedAt: checklist.tenantSignedAt || undefined,
+        landlordNotes: checklist.landlordNotes || undefined,
+        tenantNotes: checklist.tenantNotes || undefined,
+      });
+
+      return { pdfUrl };
     }),
 });
