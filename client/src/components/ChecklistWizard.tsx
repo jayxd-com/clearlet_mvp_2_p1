@@ -78,7 +78,7 @@ export function ChecklistWizard({ initialData, onComplete, onCancel }: Checklist
     }
   });
 
-  const uploadImageMutation = trpc.upload.uploadImage.useMutation();
+  const uploadImageMutation = trpc.uploads.uploadImage.useMutation();
 
   const handlePhotoUpload = async (roomIdx: number, itemIdx: number, file: File) => {
     setIsUploading({ room: roomIdx, item: itemIdx });
